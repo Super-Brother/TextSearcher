@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='text_searcher',
+    name='TextSearcher',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -38,7 +38,7 @@ exe = EXE(
 )
 app = BUNDLE(
     exe,
-    name='text_searcher.app',
-    icon=None,
+    name='TextSearcher.app',
+    icon='icon.icns',
     bundle_identifier=None,
 )
