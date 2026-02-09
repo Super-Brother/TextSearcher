@@ -7,10 +7,9 @@ from pathlib import Path
 
 import chardet
 from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QVBoxLayout,
                                QHBoxLayout, QWidget, QPushButton, QLineEdit,
-                               QTextEdit, QLabel, QCheckBox, QSpinBox, QComboBox)
+                               QPlainTextEdit, QLabel, QCheckBox, QSpinBox, QComboBox)
 
 
 # 关键字历史文件路径
@@ -297,6 +296,9 @@ class KeywordSearchApp(QMainWindow):
         self.result_buffer = []  # 缓存待显示的结果
         self.batch_size = 100  # 每100条结果更新一次UI
         self.count_update_interval = 10  # 每10条结果更新一次计数标签
+        self.max_display_results = 5000  # 最大显示结果数量，超过后停止显示但继续计数
+        self.display_count = 0  # 已显示的结果数量
+        self.is_display_limited = False  # 是否已达到显示限制
 
         # 设置主窗口布局
         layout = QVBoxLayout()
@@ -417,12 +419,12 @@ class KeywordSearchApp(QMainWindow):
         self.status_label = QLabel("就绪")
         layout.addWidget(self.status_label)
 
-        # 结果展示框
-        self.result_box = QTextEdit(self)
+        # 结果展示框（使用 QPlainTextEdit 以更好地处理大量文本）
+        self.result_box = QPlainTextEdit(self)
         self.result_box.setReadOnly(True)
-        self.result_box.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)  # 默认不换行
+        self.result_box.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)  # 默认不换行
         # 设置等宽字体以便更好地显示对齐
-        self.result_box.setStyleSheet("QTextEdit { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; }")
+        self.result_box.setStyleSheet("QPlainTextEdit { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; }")
         layout.addWidget(self.result_box)
 
         # 查询总数标签和导出按钮
@@ -493,9 +495,9 @@ class KeywordSearchApp(QMainWindow):
 
     def toggle_line_wrap(self, state):
         if state == Qt.CheckState.Checked.value:
-            self.result_box.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            self.result_box.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         else:
-            self.result_box.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+            self.result_box.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
     def on_search_button_clicked(self):
         if self.search_thread is None:
@@ -512,8 +514,12 @@ class KeywordSearchApp(QMainWindow):
         context_lines = self.context_spinbox.value()
 
         if not hasattr(self, 'selected_folder') or not keyword:
-            self.result_box.setText("请先选择文件夹并输入关键字")
+            self.result_box.setPlainText("请先选择文件夹并输入关键字")
             return
+
+        # 重置显示计数
+        self.display_count = 0
+        self.is_display_limited = False
 
         # 添加关键字到历史记录
         self.add_keyword_to_history(keyword)
@@ -563,6 +569,11 @@ class KeywordSearchApp(QMainWindow):
             self.result_buffer.clear()
 
     def on_search_progress(self, result, count):
+        # 如果已达到显示限制，只更新计数，不显示结果
+        if self.is_display_limited:
+            self.result_count_label.setText(f"查询到的总数: {count}（已达到显示限制）")
+            return
+
         # 批量处理：收集结果到缓冲区
         self.result_buffer.append(result)
 
@@ -575,30 +586,53 @@ class KeywordSearchApp(QMainWindow):
             self.batch_insert_results()
 
     def batch_insert_results(self):
-        """批量插入结果到UI，使用QTextCursor提高性能"""
-        if not self.result_buffer:
+        """批量插入结果到UI，使用直接文本插入提高性能"""
+        if not self.result_buffer or self.is_display_limited:
             return
 
-        # 暂时禁用UI更新以提高性能
-        self.result_box.setUpdatesEnabled(False)
+        # 计算可以显示的结果数量
+        remaining_capacity = self.max_display_results - self.display_count
+        if remaining_capacity <= 0:
+            self.is_display_limited = True
+            self.result_buffer.clear()
+            # 在末尾添加限制提示
+            self.result_box.appendPlainText("\n" + "=" * 80)
+            self.result_box.appendPlainText(f"已达到显示限制（{self.max_display_results}条），更多结果请使用导出功能")
+            self.result_box.appendPlainText("=" * 80)
+            return
 
-        cursor = QTextCursor(self.result_box.document())
-        cursor.movePosition(QTextCursor.End)
+        # 确定本次要插入的数量
+        results_to_insert = min(len(self.result_buffer), remaining_capacity)
 
-        # 批量插入所有缓冲的结果
-        for i, result in enumerate(self.result_buffer):
+        # 构建要插入的文本（一次性构建，减少字符串操作）
+        text_parts = []
+        for i in range(results_to_insert):
+            result = self.result_buffer[i]
             # 添加分割线（在第一条结果之前不添加）
-            total_count = self.result_box.document().blockCount() + i
-            if total_count > 1:
-                cursor.insertText("─" * 80 + "\n")
-            cursor.insertText(result)
+            if self.display_count > 0:
+                text_parts.append("─" * 80)
+                text_parts.append("\n")
+            text_parts.append(result)
+            self.display_count += 1
 
-        # 重新启用UI更新
-        self.result_box.setUpdatesEnabled(True)
-        self.result_box.ensureCursorVisible()
+        # 一次性插入所有文本
+        self.result_box.insertPlainText("".join(text_parts))
 
-        # 清空缓冲区
-        self.result_buffer.clear()
+        # 滚动到底部
+        scrollbar = self.result_box.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+        # 移除已处理的结果
+        self.result_buffer = self.result_buffer[results_to_insert:]
+
+        # 检查是否达到限制
+        if self.display_count >= self.max_display_results:
+            self.is_display_limited = True
+            self.result_buffer.clear()
+            # 在末尾添加限制提示
+            self.result_box.appendPlainText("\n" + "=" * 80)
+            self.result_box.appendPlainText(f"已达到显示限制（{self.max_display_results}条），更多结果请使用导出功能")
+            self.result_box.appendPlainText("=" * 80)
 
     def on_search_finished(self, count, cancelled):
         # 插入剩余缓冲区内容
@@ -627,7 +661,7 @@ class KeywordSearchApp(QMainWindow):
         self.search_thread = None
 
     def on_search_error(self, error):
-        self.result_box.append(error)
+        self.result_box.appendPlainText(error)
 
     def export_results(self):
         """导出搜索结果到txt文件"""
