@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+import os
 
+block_cipher = None
 
 a = Analysis(
     ['text_searcher.py'],
@@ -14,7 +17,8 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
-pyz = PYZ(a.pure)
+
+pyz = PYZ(a.pure, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -36,9 +40,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
-app = BUNDLE(
-    exe,
-    name='TextSearcher.app',
-    icon='icon.icns',
-    bundle_identifier=None,
-)
+
+# macOS: Create .app bundle
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='TextSearcher.app',
+        icon='icon.icns',
+        bundle_identifier='com.textsearcher.app',
+    )
