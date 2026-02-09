@@ -11,6 +11,8 @@
 
 TextSearcher 是一款基于 PySide6 的桌面应用程序，用于在指定目录下的文本文件中搜索关键字。它能够自动检测文件编码（使用 `chardet`），并显示匹配的行及其文件路径和行号。
 
+![界面截图](screen1.png)
+
 ### 主要功能
 
 - **文件夹搜索** - 递归搜索指定文件夹下的所有文件
@@ -41,7 +43,7 @@ python text_searcher.py
 或运行已构建的应用程序：
 
 ```bash
-open dist/text_searcher.app
+open dist/TextSearcher.app
 ```
 
 #### 2. 选择搜索文件夹
@@ -93,8 +95,8 @@ pyinstaller text_searcher.spec
 
 构建产物：
 - `build/text_searcher/` - 构建临时文件
-- `dist/text_searcher.app` - macOS 应用程序包
-- `dist/text_searcher` - 独立可执行二进制文件
+- `dist/TextSearcher.app` - macOS 应用程序包
+- `TextSearcher.dmg` - macOS 磁盘映像安装包
 
 ---
 
@@ -104,6 +106,8 @@ pyinstaller text_searcher.spec
 ### Introduction
 
 TextSearcher is a desktop application based on PySide6 for searching keywords across text files in a selected directory. It automatically detects file encodings using `chardet` and displays matching lines with file paths and line numbers.
+
+![Screenshot](screen1.png)
 
 ### Key Features
 
@@ -135,7 +139,7 @@ python text_searcher.py
 Or run the built application:
 
 ```bash
-open dist/text_searcher.app
+open dist/TextSearcher.app
 ```
 
 #### 2. Select Search Folder
@@ -187,8 +191,8 @@ pyinstaller text_searcher.spec
 
 Build artifacts:
 - `build/text_searcher/` - Build temporary files
-- `dist/text_searcher.app` - macOS application bundle
-- `dist/text_searcher` - Standalone executable binary
+- `dist/TextSearcher.app` - macOS application bundle
+- `TextSearcher.dmg` - macOS disk image installer
 
 ---
 
