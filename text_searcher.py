@@ -145,10 +145,11 @@ class SearchThread(QThread):
     search_finished = Signal(int, bool)  # 搜索完成，发送总计数和是否被取消
     search_error = Signal(str)  # 发送错误信息
 
-    def __init__(self, folder, keyword, file_filter, use_logical_search=False,
-                 context_lines=0, ignore_keyword="", use_ignore_logical=False):
+    def __init__(self, target, keyword, file_filter, use_logical_search=False,
+                 context_lines=0, ignore_keyword="", use_ignore_logical=False, is_folder=True):
         super().__init__()
-        self.folder = folder
+        self.target = target
+        self.is_folder = is_folder
         self.keyword = keyword
         self.file_filter = file_filter
         self.use_logical_search = use_logical_search
@@ -180,36 +181,48 @@ class SearchThread(QThread):
 
     def run(self):
         result_count = 0
-        for root, dirs, files in os.walk(self.folder):
-            if not self._is_running:
-                self.search_finished.emit(result_count, True)
-                return
-            for file in files:
+
+        if self.is_folder:
+            # 文件夹模式：遍历目录
+            for root, dirs, files in os.walk(self.target):
                 if not self._is_running:
                     self.search_finished.emit(result_count, True)
                     return
-                # 文件过滤
-                if self.file_filter and self.file_filter.strip() and self.file_filter.strip() not in file:
-                    continue
-                file_path = os.path.join(root, file)
-                try:
-                    # 读取部分文件内容以检测编码
-                    with open(file_path, 'rb') as f:
-                        raw_data = f.read(10000)
-                        result = chardet.detect(raw_data)
-                        encoding = result['encoding']
-
-                    with open(file_path, 'r', encoding=encoding) as f:
-                        if self.context_lines > 0:
-                            # 使用上下文窗口模式
-                            result_count = self._search_with_context(f, file_path, result_count)
-                        else:
-                            # 普通模式
-                            result_count = self._search_normal(f, file_path, result_count)
-                except Exception as e:
-                    self.search_error.emit(f"无法读取文件: {file_path}\n错误: {e}")
+                for file in files:
+                    if not self._is_running:
+                        self.search_finished.emit(result_count, True)
+                        return
+                    # 文件过滤
+                    if self.file_filter and self.file_filter.strip() and self.file_filter.strip() not in file:
+                        continue
+                    file_path = os.path.join(root, file)
+                    result_count = self._search_file(file_path, result_count)
+        else:
+            # 单文件模式：直接搜索指定文件
+            result_count = self._search_file(self.target, result_count)
 
         self.search_finished.emit(result_count, False)
+
+    def _search_file(self, file_path, result_count):
+        """搜索单个文件"""
+        try:
+            # 读取部分文件内容以检测编码
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(10000)
+                result = chardet.detect(raw_data)
+                encoding = result['encoding']
+
+            with open(file_path, 'r', encoding=encoding) as f:
+                if self.context_lines > 0:
+                    # 使用上下文窗口模式
+                    result_count = self._search_with_context(f, file_path, result_count)
+                else:
+                    # 普通模式
+                    result_count = self._search_normal(f, file_path, result_count)
+        except Exception as e:
+            self.search_error.emit(f"无法读取文件: {file_path}\n错误: {e}")
+
+        return result_count
 
     def _search_normal(self, f, file_path, result_count):
         """普通搜索模式"""
@@ -303,15 +316,20 @@ class KeywordSearchApp(QMainWindow):
         # 设置主窗口布局
         layout = QVBoxLayout()
 
-        # 选择文件夹区域（水平布局）
+        # 选择文件/文件夹区域（水平布局）
         folder_layout = QHBoxLayout()
+
+        self.file_button = QPushButton("选择单文件")
+        self.file_button.setFixedWidth(100)
+        self.file_button.clicked.connect(self.choose_file)
+        folder_layout.addWidget(self.file_button)
 
         self.folder_button = QPushButton("选择文件夹")
         self.folder_button.setFixedWidth(100)
         self.folder_button.clicked.connect(self.choose_folder)
         folder_layout.addWidget(self.folder_button)
 
-        self.folder_path_label = QLabel("未选择文件夹")
+        self.folder_path_label = QLabel("未选择")
         self.folder_path_label.setStyleSheet("color: gray;")
         folder_layout.addWidget(self.folder_path_label, 1)  # stretch=1 占据剩余空间
 
@@ -482,15 +500,30 @@ class KeywordSearchApp(QMainWindow):
             # 恢复当前输入
             self.ignore_keyword_input.setCurrentText(current_text)
 
+    def choose_file(self):
+        """选择单个文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择文件",
+            options=QFileDialog.Option.DontUseNativeDialog
+        )
+        if file_path:
+            self.selected_target = file_path
+            self.is_folder = False
+            self.folder_path_label.setText(f"文件: {file_path}")
+            self.folder_path_label.setStyleSheet("color: black;")
+
     def choose_folder(self):
+        """选择文件夹"""
         folder_path = QFileDialog.getExistingDirectory(
             self,
             "选择文件夹",
             options=QFileDialog.Option.DontUseNativeDialog
         )
         if folder_path:
-            self.selected_folder = folder_path
-            self.folder_path_label.setText(folder_path)
+            self.selected_target = folder_path
+            self.is_folder = True
+            self.folder_path_label.setText(f"文件夹: {folder_path}")
             self.folder_path_label.setStyleSheet("color: black;")
 
     def toggle_line_wrap(self, state):
@@ -513,8 +546,8 @@ class KeywordSearchApp(QMainWindow):
         use_ignore_logical = self.ignore_logical_checkbox.isChecked()
         context_lines = self.context_spinbox.value()
 
-        if not hasattr(self, 'selected_folder') or not keyword:
-            self.result_box.setPlainText("请先选择文件夹并输入关键字")
+        if not hasattr(self, 'selected_target') or not keyword:
+            self.result_box.setPlainText("请先选择文件或文件夹并输入关键字")
             return
 
         # 重置显示计数
@@ -548,8 +581,8 @@ class KeywordSearchApp(QMainWindow):
 
         # 创建并启动搜索线程
         self.search_thread = SearchThread(
-            self.selected_folder, keyword, file_filter, use_logical,
-            context_lines, ignore_keyword, use_ignore_logical
+            self.selected_target, keyword, file_filter, use_logical,
+            context_lines, ignore_keyword, use_ignore_logical, self.is_folder
         )
         self.search_thread.search_progress.connect(self.on_search_progress)
         self.search_thread.search_finished.connect(self.on_search_finished)
