@@ -205,24 +205,54 @@ class SearchThread(QThread):
 
     def _search_file(self, file_path, result_count):
         """搜索单个文件"""
+        # 尝试多种编码方式打开文件
+        encodings = []
         try:
             # 读取部分文件内容以检测编码
             with open(file_path, 'rb') as f:
                 raw_data = f.read(10000)
                 result = chardet.detect(raw_data)
-                encoding = result['encoding']
+                if result['encoding']:
+                    encodings.append(result['encoding'])
+        except Exception:
+            pass
 
-            with open(file_path, 'r', encoding=encoding) as f:
+        # 添加常用编码作为备选
+        encodings.extend(['utf-8', 'gbk', 'gb2312', 'gb18030'])
+        # 去重，保留顺序
+        seen = set()
+        unique_encodings = []
+        for enc in encodings:
+            if enc and enc not in seen:
+                seen.add(enc)
+                unique_encodings.append(enc)
+
+        # 尝试每种编码
+        for encoding in unique_encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    if self.context_lines > 0:
+                        # 使用上下文窗口模式
+                        return self._search_with_context(f, file_path, result_count)
+                    else:
+                        # 普通模式
+                        return self._search_normal(f, file_path, result_count)
+            except (UnicodeDecodeError, LookupError):
+                continue
+            except Exception as e:
+                self.search_error.emit(f"无法读取文件: {file_path}\n错误: {e}")
+                return result_count
+
+        # 所有编码都失败，尝试带错误忽略的方式
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 if self.context_lines > 0:
-                    # 使用上下文窗口模式
-                    result_count = self._search_with_context(f, file_path, result_count)
+                    return self._search_with_context(f, file_path, result_count)
                 else:
-                    # 普通模式
-                    result_count = self._search_normal(f, file_path, result_count)
+                    return self._search_normal(f, file_path, result_count)
         except Exception as e:
             self.search_error.emit(f"无法读取文件: {file_path}\n错误: {e}")
-
-        return result_count
+            return result_count
 
     def _search_normal(self, f, file_path, result_count):
         """普通搜索模式"""
